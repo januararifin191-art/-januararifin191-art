@@ -1,0 +1,8 @@
+{
+  "name": "OSIS VOTE - E-Voting Pemilihan OSIS",
+  "description": "Aplikasi E-Voting pemilihan OSIS digital yang modern, transparan, dan terpercaya.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
