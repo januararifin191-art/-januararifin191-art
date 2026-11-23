@@ -679,13 +679,17 @@ class ElectionStore {
       }
 
       const electionId = settings?.id || 'election-2026-2027';
-      let insertRes = await supabase.from('votes').insert({
-        id: voteId,
-        election_id: electionId,
-        candidate_id: candidateId,
-        verification_hash: receiptCode,
-        created_at: nowIso,
-      });
+      let insertRes = await supabase
+        .from('votes')
+        .insert({
+          id: voteId,
+          election_id: electionId,
+          candidate_id: candidateId,
+          verification_hash: receiptCode,
+          created_at: nowIso,
+        })
+        .select('id')
+        .single();
 
       // Compatibility fallback if a custom database schema omitted election_id on votes
       if (
@@ -693,21 +697,27 @@ class ElectionStore {
         (insertRes.error.code === 'PGRST204' || insertRes.error.code === '42703') &&
         insertRes.error.message.includes('election_id')
       ) {
-        insertRes = await supabase.from('votes').insert({
-          id: voteId,
-          candidate_id: candidateId,
-          verification_hash: receiptCode,
-          created_at: nowIso,
-        });
+        insertRes = await supabase
+          .from('votes')
+          .insert({
+            id: voteId,
+            candidate_id: candidateId,
+            verification_hash: receiptCode,
+            created_at: nowIso,
+          })
+          .select('id')
+          .single();
       }
 
-      if (insertRes.error) {
+      if (insertRes.error || !insertRes.data) {
         // Rollback voter status so DPT and Hasil Suara never get out of sync
         await supabase
           .from('voters')
           .update({ has_voted: false, voted_at: null, receipt_code: null })
           .eq('id', voterId);
-        throw new Error(`Gagal mencatat surat suara ke kotak suara: ${insertRes.error.message}`);
+        throw new Error(
+          `Gagal mencatat surat suara ke kotak suara: ${insertRes.error?.message || 'Konfirmasi baris suara tidak diterima.'}`
+        );
       }
 
       const updatedVoter = mapSupabaseVoter(lockedVoter);

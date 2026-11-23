@@ -29,15 +29,25 @@ export function getSupabaseConfig(): { url: string; anonKey: string } {
   };
 }
 
+const noStoreFetch: typeof fetch = (input, init) =>
+  fetch(input, {
+    ...init,
+    cache: 'no-store',
+  });
+
 const currentConfig = getSupabaseConfig();
-export let supabase = createClient(currentConfig.url, currentConfig.anonKey);
+export let supabase = createClient(currentConfig.url, currentConfig.anonKey, {
+  global: { fetch: noStoreFetch },
+});
 
 export function updateSupabaseConfig(url: string, anonKey: string) {
   if (typeof window !== 'undefined') {
     localStorage.setItem('osis_custom_supabase_url', url.trim());
     localStorage.setItem('osis_custom_supabase_anon_key', anonKey.trim());
   }
-  supabase = createClient(url.trim(), anonKey.trim());
+  supabase = createClient(url.trim(), anonKey.trim(), {
+    global: { fetch: noStoreFetch },
+  });
 }
 
 export async function checkSupabaseConnection(): Promise<{ ok: boolean; message: string; tablesExist?: boolean }> {
@@ -182,6 +192,9 @@ CREATE POLICY "Allow insert admin_logs" ON public.admin_logs FOR INSERT WITH CHE
 CREATE POLICY "Allow select admin_logs" ON public.admin_logs FOR SELECT USING (true);
 
 CREATE POLICY "Allow select and manage admin_users" ON public.admin_users FOR ALL USING (true) WITH CHECK (true);
+
+-- Pastikan kolom election_id pada tabel votes memiliki default agar semua klien tetap aman:
+ALTER TABLE public.votes ALTER COLUMN election_id SET DEFAULT 'election-2026-2027';
 
 -- Aktifkan Realtime agar perubahan data & hasil suara tersinkron langsung di seluruh perangkat:
 -- ALTER PUBLICATION supabase_realtime ADD TABLE public.votes, public.voters, public.elections, public.candidates;
