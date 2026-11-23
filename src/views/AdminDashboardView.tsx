@@ -241,31 +241,35 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   ]);
 
   const loadAllAdminData = async () => {
-    const [cands, vts, anns, logs, results, adminList] = await Promise.all([
-      electionStore.getCandidates(),
-      electionStore.getVoters(),
-      electionStore.getAnnouncements(),
-      electionStore.getAdminLogs(),
-      electionStore.getResults(),
-      electionStore.getAdmins(),
-    ]);
-    setCandidates(cands);
-    setVoters(vts);
-    setAnnouncements(anns);
-    setAdminLogs(logs);
-    setResultsData(results);
-    setAdmins(adminList);
+    try {
+      const [cands, vts, anns, logs, results, adminList] = await Promise.all([
+        electionStore.getCandidates(),
+        electionStore.getVoters(),
+        electionStore.getAnnouncements(),
+        electionStore.getAdminLogs(),
+        electionStore.getResults(),
+        electionStore.getAdmins(),
+      ]);
+      setCandidates(cands);
+      setVoters(vts);
+      setAnnouncements(anns);
+      setAdminLogs(logs);
+      setResultsData(results);
+      setAdmins(adminList);
 
-    const activeSession = electionStore.getAdminSession();
-    if (activeSession) {
-      const matched = adminList.find((a) => a.id === activeSession.id);
-      if (!matched || matched.status === 'suspended') {
-        onLogoutAdmin();
-        return;
+      const activeSession = electionStore.getAdminSession();
+      if (activeSession) {
+        const matched = adminList.find((a) => a.id === activeSession.id);
+        if (!matched || matched.status === 'suspended') {
+          onLogoutAdmin();
+          return;
+        }
+        setCurrentSessionAdmin({ ...matched, lastLogin: activeSession.lastLogin });
+      } else {
+        setCurrentSessionAdmin(null);
       }
-      setCurrentSessionAdmin({ ...matched, lastLogin: activeSession.lastLogin });
-    } else {
-      setCurrentSessionAdmin(null);
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Gagal memuat data dashboard dari Supabase.');
     }
   };
 
@@ -1157,14 +1161,57 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               <div className="bg-[#071324] p-4 rounded-2xl border border-amber-500/30 space-y-2">
                 <span className="text-xs text-amber-400 font-semibold">Kotak Suara Masuk:</span>
-                <button
-                  onClick={handleResetVotes}
-                  className="w-full py-2.5 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  title="Mengosongkan semua perolehan suara sah masuk dan mengubah status seluruh siswa menjadi Menunggu Giliran"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Jadikan Semua Menunggu Giliran</span>
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        setActionError(null);
+                        const freshResults = await electionStore.getResults();
+                        setResultsData(freshResults);
+                        const missingIds = freshResults.unrecordedVotedVoterIds || [];
+                        if (missingIds.length === 0) {
+                          setActionError('Semua pemilih yang berstatus Sudah Memilih sudah tercatat rapi di kotak suara.');
+                          return;
+                        }
+                        setConfirmModal({
+                          isOpen: true,
+                          title: `Pulihkan Hak Pilih ${missingIds.length} Pemilih`,
+                          message: `Sistem akan mengembalikan status "Menunggu Giliran" khusus untuk ${missingIds.length} siswa yang suaranya belum masuk ke kotak suara. ${freshResults.totalVotes} suara sah yang sudah masuk TIDAK terhapus. Lanjutkan?`,
+                          actionLabel: `Ya, Pulihkan ${missingIds.length} Pemilih`,
+                          isDanger: false,
+                          onConfirm: async () => {
+                            await electionStore.recoverUnrecordedVoters(
+                              missingIds,
+                              currentSessionAdmin?.fullName || 'Admin'
+                            );
+                            await loadAllAdminData();
+                          },
+                        });
+                      } catch (err: unknown) {
+                        setActionError(err instanceof Error ? err.message : 'Gagal memeriksa data kotak suara.');
+                      }
+                    }}
+                    className="w-full py-2 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    title="Pulihkan status siswa yang suaranya belum masuk ke kotak suara tanpa menghapus suara sah"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>
+                      Pulihkan Hak Pilih
+                      {resultsData?.unrecordedVotedVoterIds?.length
+                        ? ` (${resultsData.unrecordedVotedVoterIds.length})`
+                        : ''}
+                    </span>
+                  </button>
+                  <button
+                    onClick={handleResetVotes}
+                    className="w-full py-2 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    title="Mengosongkan semua perolehan suara sah masuk dan mengubah status seluruh siswa menjadi Menunggu Giliran"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Jadikan Semua Menunggu Giliran</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
