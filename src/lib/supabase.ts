@@ -3,24 +3,29 @@ import { createClient } from '@supabase/supabase-js';
 const DEFAULT_SUPABASE_URL = 'https://swxnpzppeuvnlzupixwd.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_Py_kcGTyltYxwxrCdmSLeg_zSxMYF_e';
 
+function cleanEnvValue(val: unknown): string {
+  if (typeof val !== 'string') return '';
+  return val.trim().replace(/^["']|["']$/g, '').trim();
+}
+
 export function getSupabaseConfig(): { url: string; anonKey: string } {
-  const localUrl = typeof window !== 'undefined' ? localStorage.getItem('osis_custom_supabase_url') : null;
-  const localKey = typeof window !== 'undefined' ? localStorage.getItem('osis_custom_supabase_anon_key') : null;
+  const localUrl = typeof window !== 'undefined' ? cleanEnvValue(localStorage.getItem('osis_custom_supabase_url')) : '';
+  const localKey = typeof window !== 'undefined' ? cleanEnvValue(localStorage.getItem('osis_custom_supabase_anon_key')) : '';
 
   if (typeof window !== 'undefined' && localUrl && localUrl.includes('egdmzrjeenpfzdlxpowe')) {
     localStorage.removeItem('osis_custom_supabase_url');
     localStorage.removeItem('osis_custom_supabase_anon_key');
   }
 
-  const envUrl = typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL;
-  const envKey = typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY;
+  const envUrl = cleanEnvValue(typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SUPABASE_URL : '');
+  const envKey = cleanEnvValue(typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SUPABASE_ANON_KEY : '');
 
-  const resolvedUrl = (localUrl && !localUrl.includes('egdmzrjeenpfzdlxpowe') ? localUrl : null) || envUrl || DEFAULT_SUPABASE_URL;
-  const resolvedKey = (localKey && !localKey.includes('egdmzrjeenpfzdlxpowe') ? localKey : null) || envKey || DEFAULT_SUPABASE_ANON_KEY;
+  const resolvedUrl = (localUrl && !localUrl.includes('egdmzrjeenpfzdlxpowe') ? localUrl : '') || envUrl || DEFAULT_SUPABASE_URL;
+  const resolvedKey = (localKey && !localKey.includes('egdmzrjeenpfzdlxpowe') ? localKey : '') || envKey || DEFAULT_SUPABASE_ANON_KEY;
 
   return {
-    url: resolvedUrl.trim(),
-    anonKey: resolvedKey.trim(),
+    url: resolvedUrl,
+    anonKey: resolvedKey,
   };
 }
 
@@ -44,7 +49,13 @@ export async function checkSupabaseConnection(): Promise<{ ok: boolean; message:
 
     const error = candCheck.error || adminCheck.error;
     if (!error) {
-      return { ok: true, message: 'Terhubung ke Supabase (swxnpzppeuvnlzupixwd.supabase.co) & seluruh tabel siap digunakan.', tablesExist: true };
+      let hostLabel = 'Supabase';
+      try {
+        hostLabel = new URL(getSupabaseConfig().url).host;
+      } catch {
+        // Keep fallback label
+      }
+      return { ok: true, message: `Terhubung ke Supabase (${hostLabel}) & seluruh tabel siap digunakan.`, tablesExist: true };
     }
     if (error.code === '42P01' || error.code === 'PGRST205' || error.message.includes('does not exist') || error.message.includes('schema cache')) {
       return {
@@ -171,4 +182,7 @@ CREATE POLICY "Allow insert admin_logs" ON public.admin_logs FOR INSERT WITH CHE
 CREATE POLICY "Allow select admin_logs" ON public.admin_logs FOR SELECT USING (true);
 
 CREATE POLICY "Allow select and manage admin_users" ON public.admin_users FOR ALL USING (true) WITH CHECK (true);
+
+-- Aktifkan Realtime agar perubahan data & hasil suara tersinkron langsung di seluruh perangkat:
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.votes, public.voters, public.elections, public.candidates;
 `;

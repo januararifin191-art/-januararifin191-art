@@ -27,6 +27,27 @@ export default function App() {
 
   useEffect(() => {
     initializeApp();
+    const unsubscribe = electionStore.subscribeToResultsChanges(() => {
+      Promise.all([
+        electionStore.getSettings(),
+        electionStore.getCandidates(),
+        electionStore.getAnnouncements(),
+        electionStore.getVoters(),
+      ])
+        .then(([st, cd, an, vt]) => {
+          setSettings(st);
+          setCandidates(cd);
+          setAnnouncements(an);
+          setVotersCount(vt.length);
+          const voterSession = electionStore.getCurrentVoter();
+          if (voterSession) {
+            const fresh = vt.find((v) => v.id === voterSession.id);
+            if (fresh) setCurrentVoter(fresh);
+          }
+        })
+        .catch(() => {});
+    });
+    return () => unsubscribe();
   }, []);
 
   const initializeApp = async () => {

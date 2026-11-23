@@ -173,6 +173,7 @@ async function verifyPassword(plain: string, stored?: string): Promise<boolean> 
 class ElectionStore {
   private useSupabase: boolean = false;
   private isSupabaseChecked: boolean = false;
+  private connectionCheckPromise: Promise<boolean> | null = null;
   private memoryCurrentVoter: Voter | null = null;
   private memoryAdminSession: AdminUser | null = null;
 
@@ -231,10 +232,17 @@ class ElectionStore {
   }
 
   private async ensureConnection(): Promise<boolean> {
-    if (!this.isSupabaseChecked) {
-      await this.checkConnection();
+    if (this.isSupabaseChecked && this.useSupabase) {
+      return true;
     }
-    return this.useSupabase;
+    if (!this.connectionCheckPromise) {
+      this.connectionCheckPromise = this.checkConnection()
+        .then((res) => !!res.tablesExist)
+        .finally(() => {
+          this.connectionCheckPromise = null;
+        });
+    }
+    return this.connectionCheckPromise;
   }
 
   public async checkConnection() {
@@ -292,27 +300,25 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.SETTINGS, updated);
 
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('elections').upsert({
-          id: updated.id,
-          title: updated.title,
-          academic_year: updated.academicYear,
-          school_name: updated.schoolName,
-          school_address: updated.schoolAddress || '',
-          school_logo: updated.schoolLogo || '',
-          status: updated.status,
-          start_time: updated.startTime,
-          end_time: updated.endTime,
-          is_results_published: !!updated.isResultsPublished,
-          allow_realtime_before_end: !!updated.allowRealtimeBeforeEnd,
-          tagline: updated.tagline || '',
-          contact_email: updated.contactEmail || '',
-          contact_phone: updated.contactPhone || '',
-          contact_person: updated.contactPerson || '',
-        });
-        if (error) console.warn('Supabase updateSettings error:', error.message);
-      } catch (e) {
-        console.warn('Supabase updateSettings exception:', e);
+      const { error } = await supabase.from('elections').upsert({
+        id: updated.id,
+        title: updated.title,
+        academic_year: updated.academicYear,
+        school_name: updated.schoolName,
+        school_address: updated.schoolAddress || '',
+        school_logo: updated.schoolLogo || '',
+        status: updated.status,
+        start_time: updated.startTime,
+        end_time: updated.endTime,
+        is_results_published: !!updated.isResultsPublished,
+        allow_realtime_before_end: !!updated.allowRealtimeBeforeEnd,
+        tagline: updated.tagline || '',
+        contact_email: updated.contactEmail || '',
+        contact_phone: updated.contactPhone || '',
+        contact_person: updated.contactPerson || '',
+      });
+      if (error) {
+        throw new Error(`Gagal menyimpan pengaturan ke Supabase: ${error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Pembaruan Pengaturan', `Status: ${updated.status}`);
@@ -368,26 +374,24 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.CANDIDATES, list);
 
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('candidates').upsert({
-          id: cand.id,
-          candidate_number: cand.candidateNumber,
-          chairman_name: cand.chairmanName,
-          vice_chairman_name: cand.viceChairmanName || '',
-          chairman_class: cand.chairmanClass,
-          vice_chairman_class: cand.viceChairmanClass || '',
-          photo_url: cand.photoUrl,
-          chairman_photo_url: cand.chairmanPhotoUrl || null,
-          vice_chairman_photo_url: cand.viceChairmanPhotoUrl || null,
-          tagline: cand.tagline || '',
-          vision: cand.vision,
-          missions: Array.isArray(cand.missions) ? cand.missions : [],
-          work_programs: Array.isArray(cand.workPrograms) ? cand.workPrograms : [],
-          color_theme: cand.colorTheme || '#1E3E62',
-        });
-        if (error) console.warn('Supabase saveCandidate error:', error.message);
-      } catch (e) {
-        console.warn('Supabase saveCandidate exception:', e);
+      const { error } = await supabase.from('candidates').upsert({
+        id: cand.id,
+        candidate_number: cand.candidateNumber,
+        chairman_name: cand.chairmanName,
+        vice_chairman_name: cand.viceChairmanName || '',
+        chairman_class: cand.chairmanClass,
+        vice_chairman_class: cand.viceChairmanClass || '',
+        photo_url: cand.photoUrl,
+        chairman_photo_url: cand.chairmanPhotoUrl || null,
+        vice_chairman_photo_url: cand.viceChairmanPhotoUrl || null,
+        tagline: cand.tagline || '',
+        vision: cand.vision,
+        missions: Array.isArray(cand.missions) ? cand.missions : [],
+        work_programs: Array.isArray(cand.workPrograms) ? cand.workPrograms : [],
+        color_theme: cand.colorTheme || '#1E3E62',
+      });
+      if (error) {
+        throw new Error(`Gagal menyimpan data calon ke Supabase: ${error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Kelola Calon', `Calon No. ${cand.candidateNumber}`);
@@ -399,11 +403,9 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.CANDIDATES, updated);
 
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('candidates').delete().eq('id', id);
-        if (error) console.warn('Supabase deleteCandidate error:', error.message);
-      } catch (e) {
-        console.warn('Supabase deleteCandidate exception:', e);
+      const { error } = await supabase.from('candidates').delete().eq('id', id);
+      if (error) {
+        throw new Error(`Gagal menghapus calon di Supabase: ${error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Hapus Calon', `ID: ${id}`);
@@ -470,22 +472,20 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.VOTERS, list);
 
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('voters').upsert({
-          id: normalizedVoter.id,
-          nisn: normalizedVoter.nisn,
-          full_name: normalizedVoter.fullName,
-          class_name: normalizedVoter.className,
-          gender: normalizedVoter.gender || 'L',
-          passcode: normalizedVoter.passcode,
-          has_voted: !!normalizedVoter.hasVoted,
-          voted_at: normalizedVoter.votedAt || null,
-          receipt_code: normalizedVoter.receiptCode || null,
-          status: normalizedVoter.status || 'active',
-        });
-        if (error) console.warn('Supabase saveVoter error:', error.message);
-      } catch (e) {
-        console.warn('Supabase saveVoter exception:', e);
+      const { error } = await supabase.from('voters').upsert({
+        id: normalizedVoter.id,
+        nisn: normalizedVoter.nisn,
+        full_name: normalizedVoter.fullName,
+        class_name: normalizedVoter.className,
+        gender: normalizedVoter.gender || 'L',
+        passcode: normalizedVoter.passcode,
+        has_voted: !!normalizedVoter.hasVoted,
+        voted_at: normalizedVoter.votedAt || null,
+        receipt_code: normalizedVoter.receiptCode || null,
+        status: normalizedVoter.status || 'active',
+      });
+      if (error) {
+        throw new Error(`Gagal menyimpan data pemilih ke Supabase: ${error.message}`);
       }
     }
     if (adminName !== 'System') {
@@ -551,26 +551,24 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.VOTERS, current);
 
     if ((await this.ensureConnection()) && toUpsertToSupabase.length > 0) {
-      try {
-        const batchSize = 250;
-        for (let i = 0; i < toUpsertToSupabase.length; i += batchSize) {
-          const chunk = toUpsertToSupabase.slice(i, i + batchSize).map((v) => ({
-            id: v.id,
-            nisn: v.nisn,
-            full_name: v.fullName,
-            class_name: v.className,
-            gender: v.gender || 'L',
-            passcode: v.passcode,
-            has_voted: !!v.hasVoted,
-            voted_at: v.votedAt || null,
-            receipt_code: v.receiptCode || null,
-            status: v.status || 'active',
-          }));
-          const { error } = await supabase.from('voters').upsert(chunk);
-          if (error) console.warn('Supabase bulk upsert chunk error:', error.message);
+      const batchSize = 250;
+      for (let i = 0; i < toUpsertToSupabase.length; i += batchSize) {
+        const chunk = toUpsertToSupabase.slice(i, i + batchSize).map((v) => ({
+          id: v.id,
+          nisn: v.nisn,
+          full_name: v.fullName,
+          class_name: v.className,
+          gender: v.gender || 'L',
+          passcode: v.passcode,
+          has_voted: !!v.hasVoted,
+          voted_at: v.votedAt || null,
+          receipt_code: v.receiptCode || null,
+          status: v.status || 'active',
+        }));
+        const { error } = await supabase.from('voters').upsert(chunk);
+        if (error) {
+          throw new Error(`Gagal mengunggah batch DPT ke Supabase: ${error.message}`);
         }
-      } catch (e) {
-        console.warn('Supabase bulk upsert exception:', e);
       }
     }
 
@@ -589,11 +587,9 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.VOTERS, updated);
 
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('voters').delete().eq('id', id);
-        if (error) console.warn('Supabase deleteVoter error:', error.message);
-      } catch (e) {
-        console.warn('Supabase deleteVoter exception:', e);
+      const { error } = await supabase.from('voters').delete().eq('id', id);
+      if (error) {
+        throw new Error(`Gagal menghapus data pemilih di Supabase: ${error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Hapus DPT Siswa', `ID: ${id}`);
@@ -605,15 +601,13 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.VOTERS, updated);
 
     if (await this.ensureConnection()) {
-      try {
-        const batchSize = 200;
-        for (let i = 0; i < ids.length; i += batchSize) {
-          const chunk = ids.slice(i, i + batchSize);
-          const { error } = await supabase.from('voters').delete().in('id', chunk);
-          if (error) console.warn('Supabase deleteMultipleVoters error:', error.message);
+      const batchSize = 200;
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const chunk = ids.slice(i, i + batchSize);
+        const { error } = await supabase.from('voters').delete().in('id', chunk);
+        if (error) {
+          throw new Error(`Gagal menghapus masal DPT di Supabase: ${error.message}`);
         }
-      } catch (e) {
-        console.warn('Supabase deleteMultipleVoters exception:', e);
       }
     }
     await this.logAdminAction(adminName, 'Hapus Masal DPT', `Jumlah: ${ids.length} siswa`);
@@ -622,11 +616,9 @@ class ElectionStore {
   public async deleteAllVoters(adminName = 'Super Admin'): Promise<void> {
     safeSetLocalStorage(STORAGE_KEYS.VOTERS, []);
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('voters').delete().neq('id', '');
-        if (error) console.warn('Supabase deleteAllVoters error:', error.message);
-      } catch (e) {
-        console.warn('Supabase deleteAllVoters exception:', e);
+      const { error } = await supabase.from('voters').delete().neq('id', '');
+      if (error) {
+        throw new Error(`Gagal mengosongkan seluruh DPT di Supabase: ${error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Kosongkan Seluruh DPT', 'Semua data pemilih dihapus');
@@ -638,7 +630,11 @@ class ElectionStore {
     const receiptCode = 'VOTE-' + Math.random().toString(36).substring(2, 8).toUpperCase();
     const voteId = 'v-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
-    const hasCloud = await this.ensureConnection();
+    const conn = await this.checkConnection();
+    const hasCloud = !!conn.tablesExist;
+    if (!hasCloud && conn.ok === false) {
+      throw new Error('Koneksi ke server pemilu terputus. Periksa jaringan internet Anda lalu coba kirim ulang suara.');
+    }
 
     if (hasCloud) {
       const [settings, voterQuery] = await Promise.all([
@@ -782,6 +778,7 @@ class ElectionStore {
           const { data, error } = await supabase
             .from('votes')
             .select('*')
+            .order('id', { ascending: true })
             .range(from, from + pageSize - 1);
 
           if (error) throw error;
@@ -820,6 +817,11 @@ class ElectionStore {
     const unvotedCount = voters.filter((v) => !v.hasVoted).length;
     const participationRate = totalVoters > 0 ? Math.round((votedVotersCount / totalVoters) * 100) : 0;
 
+    const recordedHashSet = new Set(votes.map((v) => v.verificationHash).filter(Boolean));
+    const unrecordedVotedVoterIds = voters
+      .filter((v) => v.hasVoted && (!v.receiptCode || !recordedHashSet.has(v.receiptCode)))
+      .map((v) => v.id);
+
     const candidateResults = candidates.map((cand) => {
       const count = votes.filter((v) => v.candidateId === cand.id).length;
       const percentage = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
@@ -842,10 +844,66 @@ class ElectionStore {
       votedVotersCount,
       unvotedCount,
       participationRate,
+      unrecordedVotedVoterIds,
+      lastUpdatedAt: new Date().toISOString(),
       candidates: candidateResults,
       isPublished: settings.isResultsPublished,
       canViewPublicly: true,
     };
+  }
+
+  public subscribeToResultsChanges(onChange: () => void): () => void {
+    const channelName = 'live-election-results-' + Math.random().toString(36).substring(2, 8);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const triggerDebounced = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        onChange();
+      }, 300);
+    };
+
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, triggerDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'voters' }, triggerDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'elections' }, triggerDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, triggerDebounced)
+      .subscribe();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }
+
+  public async recoverUnrecordedVoters(voterIds: string[], adminName: string): Promise<number> {
+    if (!voterIds || voterIds.length === 0) return 0;
+    const idSet = new Set(voterIds);
+    const voters = await this.getVoters();
+    const updatedVoters = voters.map((v) =>
+      idSet.has(v.id) ? { ...v, hasVoted: false, votedAt: null, receiptCode: undefined } : v
+    );
+    safeSetLocalStorage(STORAGE_KEYS.VOTERS, updatedVoters);
+
+    if (await this.ensureConnection()) {
+      const batchSize = 200;
+      for (let i = 0; i < voterIds.length; i += batchSize) {
+        const chunk = voterIds.slice(i, i + batchSize);
+        const { error } = await supabase
+          .from('voters')
+          .update({ has_voted: false, voted_at: null, receipt_code: null })
+          .in('id', chunk);
+        if (error) {
+          throw new Error(`Gagal memulihkan status pemilih: ${error.message}`);
+        }
+      }
+    }
+    await this.logAdminAction(
+      adminName,
+      'Pulihkan Hak Pilih',
+      `${voterIds.length} pemilih yang surat suaranya belum masuk kotak suara dipulihkan`
+    );
+    return voterIds.length;
   }
 
   public async resetAllVotes(adminName: string): Promise<void> {
@@ -855,11 +913,13 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.VOTES, []);
 
     if (await this.ensureConnection()) {
-      try {
-        await supabase.from('votes').delete().neq('id', '');
-        await supabase.from('voters').update({ has_voted: false, voted_at: null, receipt_code: null }).neq('id', '');
-      } catch (e) {
-        console.warn('Supabase reset error:', e);
+      const delRes = await supabase.from('votes').delete().neq('id', '');
+      if (delRes.error) {
+        throw new Error(`Gagal mengosongkan kotak suara di Supabase: ${delRes.error.message}`);
+      }
+      const updRes = await supabase.from('voters').update({ has_voted: false, voted_at: null, receipt_code: null }).neq('id', '');
+      if (updRes.error) {
+        throw new Error(`Gagal mengatur ulang status DPT di Supabase: ${updRes.error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Reset Suara', 'Kotak suara dikosongkan.');
@@ -873,7 +933,7 @@ class ElectionStore {
           .from('announcements')
           .select('*')
           .order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           const mapped: Announcement[] = data.map((d: any) => ({
             id: d.id,
             title: d.title,
@@ -897,18 +957,16 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.ANNOUNCEMENTS, list);
 
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('announcements').upsert({
-          id: ann.id,
-          title: ann.title,
-          content: ann.content,
-          date: ann.date,
-          priority: ann.priority || 'normal',
-          created_at: new Date().toISOString(),
-        });
-        if (error) console.warn('Supabase saveAnnouncement error:', error.message);
-      } catch (e) {
-        console.warn('Supabase saveAnnouncement exception:', e);
+      const { error } = await supabase.from('announcements').upsert({
+        id: ann.id,
+        title: ann.title,
+        content: ann.content,
+        date: ann.date,
+        priority: ann.priority || 'normal',
+        created_at: new Date().toISOString(),
+      });
+      if (error) {
+        throw new Error(`Gagal menyimpan pengumuman ke Supabase: ${error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Pengumuman Dibuat', ann.title);
@@ -920,11 +978,9 @@ class ElectionStore {
     safeSetLocalStorage(STORAGE_KEYS.ANNOUNCEMENTS, updated);
 
     if (await this.ensureConnection()) {
-      try {
-        const { error } = await supabase.from('announcements').delete().eq('id', id);
-        if (error) console.warn('Supabase deleteAnnouncement error:', error.message);
-      } catch (e) {
-        console.warn('Supabase deleteAnnouncement exception:', e);
+      const { error } = await supabase.from('announcements').delete().eq('id', id);
+      if (error) {
+        throw new Error(`Gagal menghapus pengumuman di Supabase: ${error.message}`);
       }
     }
     await this.logAdminAction(adminName, 'Hapus Pengumuman', `ID: ${id}`);
@@ -939,7 +995,7 @@ class ElectionStore {
           .select('*')
           .order('timestamp', { ascending: false })
           .limit(100);
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           const mapped: AdminLog[] = data.map((d: any) => ({
             id: d.id,
             adminName: d.admin_name,

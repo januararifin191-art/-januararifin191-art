@@ -24,18 +24,24 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ onNavigate, settings }
 
   useEffect(() => {
     fetchResults();
+    const unsubscribe = electionStore.subscribeToResultsChanges(() => {
+      fetchResults(true);
+    });
     const interval = setInterval(() => {
       fetchResults(true);
-    }, 8000);
-    const onVisible = () => {
+    }, 5000);
+    const onVisibleOrOnline = () => {
       if (document.visibilityState === 'visible') {
         fetchResults(true);
       }
     };
-    document.addEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', onVisibleOrOnline);
+    window.addEventListener('online', onVisibleOrOnline);
     return () => {
+      unsubscribe();
       clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onVisibleOrOnline);
+      window.removeEventListener('online', onVisibleOrOnline);
     };
   }, []);
 
@@ -55,6 +61,11 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ onNavigate, settings }
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
             {settings?.schoolName || 'OSIS'} · Pemilihan Ketua OSIS {settings?.academicYear || '2026/2027'}
+            {data?.lastUpdatedAt && (
+              <span className="text-emerald-400/90 tabular-nums">
+                {' '}· Live ({new Date(data.lastUpdatedAt).toLocaleTimeString('id-ID')})
+              </span>
+            )}
           </p>
         </div>
 

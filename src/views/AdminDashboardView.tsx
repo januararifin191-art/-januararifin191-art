@@ -75,8 +75,11 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [resultsData, setResultsData] = useState<{
     totalVoters: number;
     totalVotes: number;
+    votedVotersCount?: number;
     unvotedCount: number;
     participationRate: number;
+    unrecordedVotedVoterIds?: string[];
+    lastUpdatedAt?: string;
     candidates: (Candidate & { voteCount: number; percentage: number; rank: number })[];
   } | null>(null);
 
@@ -116,6 +119,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [adminSearch, setAdminSearch] = useState('');
   const [adminRoleFilter, setAdminRoleFilter] = useState<'ALL' | 'super_admin' | 'panitia'>('ALL');
   const [adminNotice, setAdminNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // In-App Confirmation Modal (Replaces window.confirm/prompt to prevent iframe blocking)
   const [confirmModal, setConfirmModal] = useState<{
@@ -190,20 +194,41 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
   useEffect(() => {
     if (activeTab !== 'overview' && activeTab !== 'voters') return;
-    const interval = setInterval(() => {
-      if (
-        !isCandidateModalOpen &&
-        !isVoterModalOpen &&
-        !isEditVoterModalOpen &&
-        !isImportModalOpen &&
-        !isManageAdminModalOpen &&
-        !isChangePasswordModalOpen &&
-        !confirmModal?.isOpen
-      ) {
+    const canAutoRefresh = () =>
+      !isCandidateModalOpen &&
+      !isVoterModalOpen &&
+      !isEditVoterModalOpen &&
+      !isImportModalOpen &&
+      !isManageAdminModalOpen &&
+      !isChangePasswordModalOpen &&
+      !confirmModal?.isOpen;
+
+    const unsubscribe = electionStore.subscribeToResultsChanges(() => {
+      if (canAutoRefresh()) {
         loadAllAdminData();
       }
-    }, 12000);
-    return () => clearInterval(interval);
+    });
+
+    const interval = setInterval(() => {
+      if (canAutoRefresh()) {
+        loadAllAdminData();
+      }
+    }, 8000);
+
+    const onVisibleOrOnline = () => {
+      if (document.visibilityState === 'visible' && canAutoRefresh()) {
+        loadAllAdminData();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibleOrOnline);
+    window.addEventListener('online', onVisibleOrOnline);
+
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibleOrOnline);
+      window.removeEventListener('online', onVisibleOrOnline);
+    };
   }, [
     activeTab,
     isCandidateModalOpen,
@@ -426,10 +451,15 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const handleSaveCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCandidate) return;
-    await electionStore.saveCandidate(editingCandidate, 'Admin');
-    setIsCandidateModalOpen(false);
-    setEditingCandidate(null);
-    await loadAllAdminData();
+    try {
+      setActionError(null);
+      await electionStore.saveCandidate(editingCandidate, currentSessionAdmin?.fullName || 'Admin');
+      setIsCandidateModalOpen(false);
+      setEditingCandidate(null);
+      await loadAllAdminData();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Gagal menyimpan data calon ke Supabase.');
+    }
   };
 
   const handleDeleteCandidate = (cand: Candidate) => {
@@ -463,12 +493,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       status: 'active',
     };
 
-    await electionStore.saveVoter(newV, 'Admin');
-    setNewVoterNisn('');
-    setNewVoterName('');
-    setNewVoterPasscode('');
-    setIsVoterModalOpen(false);
-    await loadAllAdminData();
+    try {
+      setActionError(null);
+      await electionStore.saveVoter(newV, currentSessionAdmin?.fullName || 'Admin');
+      setNewVoterNisn('');
+      setNewVoterName('');
+      setNewVoterPasscode('');
+      setIsVoterModalOpen(false);
+      await loadAllAdminData();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Gagal menambahkan data pemilih ke Supabase.');
+    }
   };
 
   const handleOpenEditVoter = (v: Voter) => {
@@ -479,10 +514,15 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const handleSaveEditedVoter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingVoter) return;
-    await electionStore.saveVoter(editingVoter, 'Admin');
-    setIsEditVoterModalOpen(false);
-    setEditingVoter(null);
-    await loadAllAdminData();
+    try {
+      setActionError(null);
+      await electionStore.saveVoter(editingVoter, currentSessionAdmin?.fullName || 'Admin');
+      setIsEditVoterModalOpen(false);
+      setEditingVoter(null);
+      await loadAllAdminData();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Gagal memperbarui data pemilih ke Supabase.');
+    }
   };
 
   const handleDeleteVoter = (v: Voter) => {
@@ -681,16 +721,26 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   // --- ACTIONS: ELECTION SETTINGS ---
   const handleToggleStatus = async (newStatus: 'upcoming' | 'ongoing' | 'completed') => {
     if (!settings) return;
-    const updated = await electionStore.updateSettings({ status: newStatus }, 'Admin');
-    onSettingsUpdate(updated);
-    await loadAllAdminData();
+    try {
+      setActionError(null);
+      const updated = await electionStore.updateSettings({ status: newStatus }, currentSessionAdmin?.fullName || 'Admin');
+      onSettingsUpdate(updated);
+      await loadAllAdminData();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Gagal mengubah status pemilihan di Supabase.');
+    }
   };
 
   const handleToggleResultsPublish = async () => {
     if (!settings) return;
-    const updated = await electionStore.updateSettings({ isResultsPublished: !settings.isResultsPublished }, 'Admin');
-    onSettingsUpdate(updated);
-    await loadAllAdminData();
+    try {
+      setActionError(null);
+      const updated = await electionStore.updateSettings({ isResultsPublished: !settings.isResultsPublished }, currentSessionAdmin?.fullName || 'Admin');
+      onSettingsUpdate(updated);
+      await loadAllAdminData();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Gagal mengubah status publikasi hasil di Supabase.');
+    }
   };
 
   const handleResetVotes = () => {
@@ -926,6 +976,22 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </button>
       </div>
 
+      {actionError && (
+        <div className="bg-rose-500/15 border border-rose-500/40 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs text-rose-200">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-bold cursor-pointer shrink-0"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
       {/* TAB 1: OVERVIEW & CONTROL */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
@@ -942,7 +1008,11 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               <p className="text-3xl font-black text-emerald-400 font-mono mt-1">
                 {(resultsData?.totalVotes || 0).toLocaleString('id-ID')}
               </p>
-              <p className="text-xs text-slate-400 mt-1">Total suara tercatat</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {typeof resultsData?.votedVotersCount === 'number' && resultsData.votedVotersCount !== resultsData.totalVotes
+                  ? `DPT terpakai: ${resultsData.votedVotersCount.toLocaleString('id-ID')} siswa`
+                  : 'Total suara tercatat'}
+              </p>
             </div>
 
             <div className="bg-[#0B1A30] border border-slate-800 p-5 rounded-2xl">
@@ -966,6 +1036,45 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               </div>
             </div>
           </div>
+
+          {resultsData?.unrecordedVotedVoterIds && resultsData.unrecordedVotedVoterIds.length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-amber-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Ditemukan {resultsData.unrecordedVotedVoterIds.length} pemilih berstatus "Sudah Memilih" yang suaranya belum masuk ke kotak suara
+                  </span>
+                </p>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Hal ini terjadi apabila pemilih menggunakan tautan aplikasi (Shared URL) versi sebelumnya sebelum diperbarui. Pastikan Anda klik <strong>Share / Publish ulang</strong> tautan publik agar semua perangkat memakai versi terbaru, lalu pulihkan hak pilih {resultsData.unrecordedVotedVoterIds.length} siswa tersebut jika ingin mereka memilih ulang (suara sah yang sudah masuk tetap aman).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const missingIds = resultsData.unrecordedVotedVoterIds || [];
+                  setConfirmModal({
+                    isOpen: true,
+                    title: `Pulihkan Hak Pilih ${missingIds.length} Pemilih`,
+                    message: `Sistem hanya akan mengatur ulang status "Sudah Memilih" untuk ${missingIds.length} siswa yang suaranya belum tercatat di kotak suara. ${resultsData.totalVotes} suara sah yang sudah masuk TIDAK akan terhapus. Lanjutkan?`,
+                    actionLabel: `Ya, Pulihkan ${missingIds.length} Pemilih`,
+                    isDanger: false,
+                    onConfirm: async () => {
+                      await electionStore.recoverUnrecordedVoters(
+                        missingIds,
+                        currentSessionAdmin?.fullName || 'Admin'
+                      );
+                      await loadAllAdminData();
+                    },
+                  });
+                }}
+                className="shrink-0 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer shadow-md"
+              >
+                Pulihkan Hak Pilih ({resultsData.unrecordedVotedVoterIds.length} Siswa)
+              </button>
+            </div>
+          )}
 
           {/* Quick Election Control Box */}
           <div className="bg-gradient-to-r from-[#0C1F3A] to-[#0A182C] border-2 border-amber-500/30 rounded-3xl p-6 space-y-4">
@@ -1062,18 +1171,28 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
           {/* Quick Perolehan Suara Bar Chart Preview */}
           <div className="bg-[#0B1A30] border border-slate-800 rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Award className="w-5 h-5 text-amber-400" />
-                Rekapitulasi Suara Sementara (Realtime)
+                <span>Rekapitulasi Suara Sementara (Realtime)</span>
               </h3>
-              <button
-                onClick={() => onNavigate('results')}
-                className="text-xs text-amber-400 hover:underline flex items-center gap-1"
-              >
-                <span>Halaman Hasil Penuh</span>
-                <span>→</span>
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => loadAllAdminData()}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Segarkan</span>
+                </button>
+                <button
+                  onClick={() => onNavigate('results')}
+                  className="text-xs text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Halaman Hasil Penuh</span>
+                  <span>→</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1790,27 +1909,34 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 const startTime = (form.elements.namedItem('startTime') as HTMLInputElement).value;
                 const endTime = (form.elements.namedItem('endTime') as HTMLInputElement).value;
 
-                const updated = await electionStore.updateSettings(
-                  {
-                    schoolName,
-                    schoolAddress,
-                    academicYear,
-                    tagline,
-                    contactPerson,
-                    contactPhone,
-                    schoolLogo: settingsLogo.trim(),
-                    contactEmail,
-                    startTime: new Date(startTime).toISOString(),
-                    endTime: new Date(endTime).toISOString(),
-                  },
-                  currentSessionAdmin?.fullName || 'Admin'
-                );
-                onSettingsUpdate(updated);
-                setSettingsNotice({
-                  type: 'success',
-                  message: 'Pengaturan identitas sekolah, logo, alamat, & jadwal berhasil disimpan dan disinkronkan!',
-                });
-                setTimeout(() => setSettingsNotice(null), 5000);
+                try {
+                  const updated = await electionStore.updateSettings(
+                    {
+                      schoolName,
+                      schoolAddress,
+                      academicYear,
+                      tagline,
+                      contactPerson,
+                      contactPhone,
+                      schoolLogo: settingsLogo.trim(),
+                      contactEmail,
+                      startTime: new Date(startTime).toISOString(),
+                      endTime: new Date(endTime).toISOString(),
+                    },
+                    currentSessionAdmin?.fullName || 'Admin'
+                  );
+                  onSettingsUpdate(updated);
+                  setSettingsNotice({
+                    type: 'success',
+                    message: 'Pengaturan identitas sekolah, logo, alamat, & jadwal berhasil disimpan dan disinkronkan!',
+                  });
+                  setTimeout(() => setSettingsNotice(null), 5000);
+                } catch (err: unknown) {
+                  setSettingsNotice({
+                    type: 'error',
+                    message: err instanceof Error ? err.message : 'Gagal menyimpan pengaturan ke Supabase.',
+                  });
+                }
               }}
               className="space-y-4"
             >
@@ -3508,18 +3634,23 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   type="button"
                   onClick={async () => {
                     if (!annTitle.trim()) return;
-                    await electionStore.saveAnnouncement(
-                      {
-                        id: 'ann-' + Math.random().toString(36).substring(2, 7),
-                        title: annTitle,
-                        content: annContent,
-                        date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
-                        priority: annPriority,
-                      },
-                      'Admin'
-                    );
-                    setIsAnnounceModalOpen(false);
-                    await loadAllAdminData();
+                    try {
+                      setActionError(null);
+                      await electionStore.saveAnnouncement(
+                        {
+                          id: 'ann-' + Math.random().toString(36).substring(2, 7),
+                          title: annTitle,
+                          content: annContent,
+                          date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+                          priority: annPriority,
+                        },
+                        currentSessionAdmin?.fullName || 'Admin'
+                      );
+                      setIsAnnounceModalOpen(false);
+                      await loadAllAdminData();
+                    } catch (err: unknown) {
+                      setActionError(err instanceof Error ? err.message : 'Gagal menerbitkan pengumuman ke Supabase.');
+                    }
                   }}
                   className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs"
                 >
@@ -4020,8 +4151,11 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 disabled={isConfirmLoading}
                 onClick={async () => {
                   try {
+                    setActionError(null);
                     setIsConfirmLoading(true);
                     await confirmModal.onConfirm();
+                  } catch (err: unknown) {
+                    setActionError(err instanceof Error ? err.message : 'Gagal menjalankan tindakan ke Supabase.');
                   } finally {
                     setIsConfirmLoading(false);
                     setConfirmModal(null);
